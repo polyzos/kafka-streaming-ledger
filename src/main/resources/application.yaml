@@ -1,0 +1,10 @@
+kafka:
+  servers: ""
+  securityProtocol: "SSL"
+  ssl:
+    truststoreLocation: "client.truststore.jks"
+    truststorePassword: ""
+    keystoreType: "PKCS12"
+    keystoreLocation: "client.keystore.p12"
+    keystorePassword: ""
+    keyPassword: ""
