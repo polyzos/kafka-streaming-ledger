@@ -14,11 +14,10 @@ import java.util.concurrent.atomic.AtomicInteger
 
 fun main() = runBlocking {
     val properties = KafkaConfig.buildConsumerProps(
-        "ecommerce.events.group.parallel"
+        "ecommerce.events.group"
     )
 
     properties[ConsumerConfig.AUTO_OFFSET_RESET_CONFIG] = "earliest"
-    properties[ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG] = "false" //"client-$id"
 
     val adminClient = AdminClient.create(properties)
 
@@ -37,10 +36,7 @@ fun main() = runBlocking {
                     id = id,
                     topic = KafkaConfig.EVENTS_TOPIC,
                     properties = properties,
-                    consumePartitionMsgCount = consumePartitionMsgCount,
-                    consumeFixed = true,
-                    numMessages = 1000000,
-                    consumerParallel = true
+                    consumePartitionMsgCount = consumePartitionMsgCount
                 )
             }
         }

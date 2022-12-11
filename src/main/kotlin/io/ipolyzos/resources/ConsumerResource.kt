@@ -7,6 +7,8 @@ import io.ipolyzos.show
 import io.ipolyzos.utils.LoggingUtils
 import org.apache.kafka.clients.consumer.ConsumerRecords
 import org.apache.kafka.clients.consumer.KafkaConsumer
+import org.apache.kafka.clients.consumer.OffsetAndMetadata
+import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.errors.WakeupException
 import java.time.Duration
 
@@ -19,10 +21,10 @@ context(LoggingUtils)
 class ConsumerResource<K, V> (
     id: Int, topic: String,
     properties: Properties,
+    consumerParallel: Boolean = false,
     private val consumePartitionMsgCount: AtomicInteger,
-    private val consumeFixed: Boolean = false,
-    private val numMessages: Int = -1,
-    consumerParallel: Boolean = false
+    private val autoCommit: Boolean = true,
+    private val perMessageCommit: Boolean = false
 ) {
     private val counter = AtomicInteger(0)
     private val consumerName = "Consumer-$id"
@@ -32,71 +34,50 @@ class ConsumerResource<K, V> (
         logger.info("Starting Kafka '$consumerName' in group '${properties["group.id"]}' with configs ...")
         properties.show()
         consumer = KafkaConsumer<K, V>(properties)
-        val mainThread = Thread.currentThread()
-
-        Runtime.getRuntime().addShutdownHook(Thread {
-            logger.info("[$consumerName] Detected a shutdown, let's exit by calling consumer.wakeup()...")
-            consumer.wakeup()
-
-            // join the main thread to allow the execution of the code in the main thread
-            try {
-                mainThread.join()
-            } catch (e: InterruptedException) {
-                e.printStackTrace()
-            }
-        })
+        registerShutdownHook()
         if (consumerParallel) consumeParallel(topic) else consume(topic)
-    }
-
-    private fun consumeInfinite() {
-        while (true) {
-            runConsumerLoop()
-        }
-    }
-
-    private fun consumeFixed(numMessages: Int) {
-        while (consumePartitionMsgCount.get() < numMessages) {
-            runConsumerLoop()
-        }
-        logger.info { "[$consumerName] Finished Consuming $numMessages messages ..." }
     }
 
     private fun consume(topic: String) {
         consumer.subscribe(listOf(topic))
         try {
-            when (consumeFixed) {
-                true -> consumeFixed(numMessages)
-                else -> {
-                    consumeInfinite()
-                }
+            while (true) {
+                runConsumerLoop()
             }
         } catch (e: WakeupException) {
             logger.info("[$consumerName] Received Wake up exception!")
         } catch (e: Exception) {
             logger.warn("[$consumerName] Unexpected exception: {}", e.message)
         } finally {
-
-//            logger.info { "${listener.getCurrentOffsets()}" }
-//            consumer.commitSync(listener.getCurrentOffsets())
-            consumer.close() // this will also commit the offsets if need be.
+            consumer.close()
             logger.info("[$consumerName] The consumer is now gracefully closed.")
         }
     }
 
-
     private fun runConsumerLoop() {
         val records: ConsumerRecords<K, V> = consumer.poll(Duration.ofMillis(100))
         if (records.count() > 0) {
-            records.forEach { _ ->
+            records.forEach { record ->
                 // simulate the consumers doing some work
-//                Thread.sleep(20)
+                Thread.sleep(20)
+                if (perMessageCommit) {
+                    val commitEntry: Map<TopicPartition, OffsetAndMetadata> =
+                        mapOf(TopicPartition(record.topic(), record.partition()) to OffsetAndMetadata(record.offset()))
+                    consumer.commitAsync(commitEntry) { topicPartition, offsetMetadata ->
+                        logger.info { "Committed: $topicPartition and $offsetMetadata" }
+                    }
+                }
             }
             records.show()
             counter.addAndGet(records.count())
             consumePartitionMsgCount.addAndGet(records.count())
-            logger.info { "[$consumerName] Records in batch: ${records.count()} - Total so far: ${counter.get()} - Topic: ${consumePartitionMsgCount.get()}" }
+            logger.info { "[$consumerName] Records in batch: ${records.count()} - Total Consumer Processed: ${counter.get()} - Total Group Processed: ${consumePartitionMsgCount.get()}" }
+            if (!autoCommit && !perMessageCommit) {
+                val maxOffset: Long = records.maxOfOrNull { it.offset() }!!
+                commitMessage(maxOffset)
+            }
 
-//                val commitEntry: Map<TopicPartition, OffsetAndMetadata> =
+        //                val commitEntry: Map<TopicPartition, OffsetAndMetadata> =
 //                    mapOf(TopicPartition(r.topic(), r.partition()) to OffsetAndMetadata(r.offset()))
 //                consumer.commitAsync(commitEntry) { topicPartition, offsetMetadata ->
 //                    logger.info { "Committed: $topicPartition and $offsetMetadata" }
@@ -106,6 +87,12 @@ class ConsumerResource<K, V> (
         }
     }
 
+    private fun commitMessage(maxOffset: Long) {
+        consumer.commitAsync { topicPartition, offsetMetadata ->
+            topicPartition.forEach { v -> println(v) }
+            logger.info { "Processed up to offset: $maxOffset - Committed: $topicPartition and $offsetMetadata" }
+        }
+    }
 
     fun consumeParallel(topic: String) {
         val options: ParallelConsumerOptions<K, V> =
@@ -128,12 +115,6 @@ class ConsumerResource<K, V> (
                 t0 = System.currentTimeMillis()
             }
 
-            if (consumePartitionMsgCount.get() == numMessages) {
-                logger.info { "Consumed $consumePartitionMsgCount messages ..." }
-                logger.info { "[$consumerName] Elapsed Time: ${TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis() - t0)} seconds." }
-                consumer.close()
-            }
-
             val processingTime = measureTimeMillis {
                 context.consumerRecordsFlattened.forEach { _ ->
                     Thread.sleep(20)
@@ -141,7 +122,21 @@ class ConsumerResource<K, V> (
             }
             counter.addAndGet(context.consumerRecordsFlattened.count())
             consumePartitionMsgCount.addAndGet(context.consumerRecordsFlattened.count())
-            logger.info { "[$consumerName] Processing '${context.size()}' records in $processingTime millis. Total: ${counter.get()} - ${consumePartitionMsgCount.get()}" }
+            logger.info { "[$consumerName] Records in batch: ${context.consumerRecordsFlattened.count()} - Total Consumer Processed: ${counter.get()} - Total Group Processed: ${consumePartitionMsgCount.get()}" }
         }
+    }
+
+    private fun registerShutdownHook() {
+        val currentThread = Thread.currentThread()
+
+        Runtime.getRuntime().addShutdownHook(Thread {
+            logger.info("[$consumerName] Detected a shutdown, let's exit by calling consumer.wakeup()...")
+            consumer.wakeup()
+            try {
+                currentThread.join()
+            } catch (e: InterruptedException) {
+                e.printStackTrace()
+            }
+        })
     }
 }

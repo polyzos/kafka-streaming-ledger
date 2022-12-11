@@ -1,4 +1,4 @@
-package io.ipolyzos.producers.json
+package io.ipolyzos.producers
 
 import io.ipolyzos.resources.ProducerResource
 import io.ipolyzos.config.KafkaConfig
