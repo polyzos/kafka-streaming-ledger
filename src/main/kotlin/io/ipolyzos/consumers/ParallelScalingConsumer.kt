@@ -14,7 +14,7 @@ import java.util.concurrent.atomic.AtomicInteger
 
 fun main() = runBlocking {
     val properties = KafkaConfig.buildConsumerProps(
-        "ecommerce.events.group.parallel2"
+        "ecommerce.events.group.parallel"
     )
 
     properties[ConsumerConfig.AUTO_OFFSET_RESET_CONFIG] = "earliest"

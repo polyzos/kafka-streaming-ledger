@@ -13,6 +13,7 @@ object KafkaConfig {
     private val kafkaConfig: KafkaConnection = ConfigLoader.loadConfig().kafka
 
     const val EVENTS_TOPIC      = "ecommerce.events"
+    const val TEST_TOPIC        = "test"
 
     private val CREDENTIALS_PATH: String = System.getProperty("user.home", ".") + "/Documents/temp/"
 

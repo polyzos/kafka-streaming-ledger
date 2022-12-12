@@ -15,7 +15,6 @@ import java.time.Duration
 import java.util.Properties
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
-import kotlin.system.measureTimeMillis
 
 context(LoggingUtils)
 class ConsumerResource<K, V> (
@@ -29,6 +28,10 @@ class ConsumerResource<K, V> (
     private val counter = AtomicInteger(0)
     private val consumerName = "Consumer-$id"
     private val consumer: KafkaConsumer<K, V>
+
+    private var initLoop = false
+    private var t0 = System.currentTimeMillis()
+    private var lastOffsetCommitted: Long = -1
 
     init {
         logger.info("Starting Kafka '$consumerName' in group '${properties["group.id"]}' with configs ...")
@@ -55,43 +58,43 @@ class ConsumerResource<K, V> (
     }
 
     private fun runConsumerLoop() {
+        if (!initLoop) {
+            initLoop = true
+            t0 = System.currentTimeMillis()
+        }
         val records: ConsumerRecords<K, V> = consumer.poll(Duration.ofMillis(100))
         if (records.count() > 0) {
             records.forEach { record ->
                 // simulate the consumers doing some work
                 Thread.sleep(20)
                 if (perMessageCommit) {
+                    logger.info { "Processed Message: ${record.value()} with offset: ${record.partition()}:${record.offset()}" }
                     val commitEntry: Map<TopicPartition, OffsetAndMetadata> =
                         mapOf(TopicPartition(record.topic(), record.partition()) to OffsetAndMetadata(record.offset()))
-                    consumer.commitAsync(commitEntry) { topicPartition, offsetMetadata ->
-                        logger.info { "Committed: $topicPartition and $offsetMetadata" }
-                    }
+
+                    consumer.commitSync(commitEntry)
+                    logger.info { "Committed offset: ${record.partition()}:${record.offset()}" }
                 }
             }
             records.show()
             counter.addAndGet(records.count())
             consumePartitionMsgCount.addAndGet(records.count())
-            logger.info { "[$consumerName] Records in batch: ${records.count()} - Total Consumer Processed: ${counter.get()} - Total Group Processed: ${consumePartitionMsgCount.get()}" }
+            logger.info { "[$consumerName] Records in batch: ${records.count()} - Elapsed Time: ${TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis()-t0)} seconds - Total Consumer Processed: ${counter.get()} - Total Group Processed: ${consumePartitionMsgCount.get()}" }
             if (!autoCommit && !perMessageCommit) {
                 val maxOffset: Long = records.maxOfOrNull { it.offset() }!!
-                commitMessage(maxOffset)
+                commitOffsets(maxOffset)
             }
-
-        //                val commitEntry: Map<TopicPartition, OffsetAndMetadata> =
-//                    mapOf(TopicPartition(r.topic(), r.partition()) to OffsetAndMetadata(r.offset()))
-//                consumer.commitAsync(commitEntry) { topicPartition, offsetMetadata ->
-//                    logger.info { "Committed: $topicPartition and $offsetMetadata" }
-//                }
-//                    consumer.commitSync(commitEntry)
-//                    logger.info { "Committed: $commitEntry" }
         }
     }
 
-    private fun commitMessage(maxOffset: Long) {
-        consumer.commitAsync { topicPartition, offsetMetadata ->
-            topicPartition.forEach { v -> println(v) }
-            logger.info { "Processed up to offset: $maxOffset - Committed: $topicPartition and $offsetMetadata" }
-        }
+    private fun commitOffsets(maxOffset: Long) {
+        consumer.commitSync()
+        logger.info { "Previous last offset: $lastOffsetCommitted - Committed offset: $maxOffset" }
+        lastOffsetCommitted = maxOffset
+//        { topicPartition, offsetMetadata ->
+
+//            logger.info { "Processed up to offset: $maxOffset - Committed: $topicPartition and $offsetMetadata" }
+//        }
     }
 
     fun consumeParallel(topic: String) {
@@ -106,8 +109,6 @@ class ConsumerResource<K, V> (
 
         val eos = ParallelStreamProcessor.createEosStreamProcessor(options)
         eos.subscribe(listOf(topic))
-        var initLoop = false
-        var t0 = System.currentTimeMillis()
 
         eos.poll { context ->
             if (!initLoop) {
@@ -115,14 +116,19 @@ class ConsumerResource<K, V> (
                 t0 = System.currentTimeMillis()
             }
 
-            val processingTime = measureTimeMillis {
-                context.consumerRecordsFlattened.forEach { _ ->
-                    Thread.sleep(20)
-                }
+            context.consumerRecordsFlattened.forEach { _ ->
+                Thread.sleep(20)
             }
+
             counter.addAndGet(context.consumerRecordsFlattened.count())
             consumePartitionMsgCount.addAndGet(context.consumerRecordsFlattened.count())
-            logger.info { "[$consumerName] Records in batch: ${context.consumerRecordsFlattened.count()} - Total Consumer Processed: ${counter.get()} - Total Group Processed: ${consumePartitionMsgCount.get()}" }
+            logger.info {
+                "[$consumerName] Records in batch: ${context.consumerRecordsFlattened.count()} - Elapsed Time: ${
+                    TimeUnit.MILLISECONDS.toSeconds(
+                        System.currentTimeMillis() - t0
+                    )
+                } seconds - Total Consumer Processed: ${counter.get()} - Total Group Processed: ${consumePartitionMsgCount.get()}"
+            }
         }
     }
 
