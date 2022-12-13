@@ -11,4 +11,4 @@ Source for the Blog Post series - **In the Land of Streams with Kafka**, from th
 - **Part 1:** A Producer's Message
 - **Part 2:** The rise of the Consumers
 - **Part 3:** Offsets and How to Handle Them
-- **Part 4:** Client Failover In Practise
+- **Part 4:** My Cluster is Lost!! - Embracing Failure
