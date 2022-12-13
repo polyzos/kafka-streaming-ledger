@@ -5,7 +5,7 @@ Kafka Streaming Ledger
     <img src="images/logo.png" width="500" height="250">
 </p>
 
-Source for the Blog Post series - **In the Land of Streams with Kafka**, from the **Streaming Ledger Index**
+Source code for the Blog Post series - **In the Land of Streams with Kafka**, from the **Streaming Ledger Index**
 
 ### Blog Post Series
 - **Part 1:** A Producer's Message
