@@ -10,7 +10,9 @@ import java.util.concurrent.atomic.AtomicInteger
 
 fun main() {
     val properties = KafkaConfig.buildConsumerProps(
-        "ecommerce.events.group.single"
+        "ecommerce.events.group.single",
+        autoCommit = true,
+        withSecurityProps = false
     )
     properties[ConsumerConfig.AUTO_OFFSET_RESET_CONFIG] = "earliest"
 

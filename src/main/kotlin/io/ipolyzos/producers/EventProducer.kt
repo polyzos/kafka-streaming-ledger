@@ -18,7 +18,7 @@ object ECommerceProducer {
         val events: Sequence<ClickEvent> = DataSourceUtils
             .loadDataFile("events.csv", DataSourceUtils.toEvent)
 
-        val properties = KafkaConfig.buildProducerProps()
+        val properties = KafkaConfig.buildProducerProps(false)
 
         val producerResource: ProducerResource<String, ClickEvent> = ProducerResource.live<String, ClickEvent>(properties)
 
